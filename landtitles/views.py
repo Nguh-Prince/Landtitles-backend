@@ -6,6 +6,7 @@ from rest_framework import views, viewsets, status
 from rest_framework.authtoken.models import Token  # For token-based authentication
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.serializers import ValidationError as SerializerValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from . import serializers
@@ -17,7 +18,7 @@ def get_and_authenticate_user(identifier: str, password: str):
     """
     identifier can either be username, phone number or email address
     """
-    user_not_found_exception = serializers.ValidationError("Invalid username or password. Please try again!")
+    user_not_found_exception = SerializerValidationError("Invalid username or password. Please try again!")
     try:
         user = User.objects.get( Q(username=identifier) | Q(email=identifier) )
         
