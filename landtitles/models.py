@@ -31,9 +31,8 @@ class Profile(models.Model):
     email = models.CharField(max_length=15)
     telephone = models.CharField(max_length=15)
     role = models.CharField(max_length=15)
-    dob = models.CharField(max_length=15)
+    dob = models.DateField(max_length=15)
     birth_location = models.CharField(max_length=15)
-    password = models.CharField(max_length=15)
     # Add other fields as needed
 
     def __str__(self):

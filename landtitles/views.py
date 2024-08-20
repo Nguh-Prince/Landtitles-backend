@@ -1,40 +1,126 @@
-from rest_framework import serializers, views, status
-from rest_framework.response import Response
-from django.contrib.auth.models import User  # Django's built-in User model
-from django.contrib.auth import authenticate  # For verifying user credentials
+from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, logout
+from django.db.models import Q
+
+from rest_framework import views, viewsets, status
 from rest_framework.authtoken.models import Token  # For token-based authentication
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
-# Serializer for registering users
-class RegisterSerializer(serializers.Serializer):
-    # This specifies that the 'password' field should only be used for writing, not for reading (e.g., sending back to the user)
-    name = serializers.CharField(write_only=True)
-    surname = serializers.CharField(write_only=True)
-    address = serializers.CharField(write_only=True)
-    email = serializers.CharField(write_only=True)
-    telephone = serializers.CharField(write_only=True)
-    role = serializers.CharField(write_only=True)
-    dob = serializers.CharField(write_only=True)
-    birth_location = serializers.CharField(write_only=True)
-    password = serializers.CharField(write_only=True)
+from . import serializers
+from .models import Profile
 
-    class Meta:
-        # model = User  # This is the model the serializer is based on, Django's built-in User model
-        # The fields here correspond to the attributes of the User model in your database
-        fields = ('name', 'surname', 'address','email','telephone','role','dob','birth_location','password')  # Modify these if your User model has different or additional fields
+User = get_user_model()
 
-    def create(self, validated_data):
-        username, password, email = validated_data.get("name", None), validated_data.get("password", None), validated_data.get("email", None)
+def get_and_authenticate_user(identifier: str, password: str):
+    """
+    identifier can either be username, phone number or email address
+    """
+    user_not_found_exception = serializers.ValidationError("Invalid username or password. Please try again!")
+    try:
+        user = User.objects.get( Q(username=identifier) | Q(email=identifier) )
+        
+        user = authenticate(username=user.username, password=password)
+        
+        if user:
+            return user
+        raise user_not_found_exception
 
-        # Creates a new user using the validated data. This function is called when the serializer's `save()` method is called.
-        user = User.objects.create_user(username=username, password=password, email=email)
+    except User.DoesNotExist:
+        raise user_not_found_exception
 
-        Profile.objects.create(user=user, **validated_data)
 
-        return user
+def create_user_account(username, password, first_name="", last_name="", email="", phone="", country_code="", **kwargs):
+    user = User.objects.create_user(username=username, email=email, password=password, first_name=first_name, last_name=last_name, is_staff=False)
+    # create person
+    Profile.objects.create(name=first_name, surname=last_name, telephone=phone, user=user, country_code=country_code, **kwargs)
+    return user
+
+class AuthViewSet(viewsets.GenericViewSet):
+    permision_classes = [AllowAny, ]
+    serializer_class = serializers.EmptySerializer
+    serializer_classes = {
+        'login': serializers.UserLoginSerializer,
+        'register': serializers.RegisterSerializer,
+        'change_password': serializers.ChangePasswordSerializer,
+        # 'update_profile': serializers.UpdateUserSerializer
+    }
+    queryset = User.objects.all()
+
+    @action(methods=['POST', ], detail=False)
+    def login(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = get_and_authenticate_user(**serializer.validated_data)
+        data = serializers.AuthenticatedUserSerializer(user).data
+        return Response(data=data, status=status.HTTP_200_OK)
+
+    @action(methods=['POST'], detail=False)
+    def register(self, request):
+        serializer: serializers.RegisterSerializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        user = serializer.create(serializer.validated_data)
+        
+        data = serializers.AuthenticatedUserSerializer(user).data
+
+        return Response(data=data, status=status.HTTP_201_CREATED)
+
+    @action(methods=['POST'], detail=False)
+    def logout(self, request):
+        logout(request)
+        data = {'success': "Logged out successfully"}
+        return Response(data=data, status=status.HTTP_200_OK)
+
+    @action(methods=['POST'], detail=False)
+    def change_password(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        user.set_password( serializer.validated_data['new_password'] )
+        user.save()
+
+        return Response(data={"message": _("Password changed successfully")})
+
+    @action(methods=["POST"], detail=False, permision_classes=[IsAuthenticated,])
+    def update_profile(self, request):
+        user = request.user
+        user_query = User.objects.filter(id=user.id)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        if "profile" in serializer.validated_data:
+            profile_object = serializer.validated_data.pop("profile")
+            profile_query = Profile.objects.filter(user=user).update(**profile_object)
+
+            if "first_name" in profile_object:
+                user_query.update(first_name=profile_object['first_name'])
+
+            if "last_name" in profile_object:
+                user_query.update(last_name=profile_object['last_name'])
+
+        if serializer.validated_data:
+            user_query.update(**serializer.validated_data)
+
+        user.refresh_from_db()
+
+        return Response(serializers.AuthenticatedUserSerializer(user).data)
+
+    def get_serializer_class(self):
+        if not isinstance(self.serializer_classes, dict):
+            raise ImproperlyConfigured(_("serializer_classes variable must be a dict mapping"))
+
+        if self.action in self.serializer_classes.keys():
+            return self.serializer_classes[self.action]
+        
+        return super().get_serializer_class()
+
 
 # View for user registration
 class RegisterView(views.APIView):
-    
     def post(self, request):
         # The serializer converts the incoming JSON data into a Python dictionary and validates it
         serializer = RegisterSerializer(data=request.data)
