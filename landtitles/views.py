@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
-from django.contrib.auth import authenticate, logout
+from django.contrib.auth import authenticate, login as auth_login, logout
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models import Q
+from django.utils.translation import gettext as _
 
 from rest_framework import views, viewsets, status
 from rest_framework.authtoken.models import Token  # For token-based authentication
@@ -54,6 +56,9 @@ class AuthViewSet(viewsets.GenericViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = get_and_authenticate_user(**serializer.validated_data)
+
+        auth_login(request, user)
+
         data = serializers.AuthenticatedUserSerializer(user).data
         return Response(data=data, status=status.HTTP_200_OK)
 
@@ -118,32 +123,6 @@ class AuthViewSet(viewsets.GenericViewSet):
             return self.serializer_classes[self.action]
         
         return super().get_serializer_class()
-
-
-# View for user registration
-class RegisterView(views.APIView):
-    def post(self, request):
-        # The serializer converts the incoming JSON data into a Python dictionary and validates it
-        serializer = RegisterSerializer(data=request.data)
-        if serializer.is_valid():
-            # If the data is valid, save it to create a new user
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)  # Respond with the created user's data
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)  # If invalid, respond with errors
-
-# View for user login
-class LoginView(views.APIView):
-    def post(self, request):
-        # Extract the username and password from the incoming request data
-        username = request.data.get('username')
-        password = request.data.get('password')
-        # Authenticate the user using the provided credentials
-        user = authenticate(username=username, password=password)
-        if user:
-            # If the credentials are correct, generate or retrieve a token for the user
-            token, _ = Token.objects.get_or_create(user=user)
-            return Response({'token': token.key})  # Send the token back to the client (your React app)
-        return Response({'error': 'Invalid Credentials'}, status=status.HTTP_400_BAD_REQUEST)  # If invalid, respond with an error
 
 # class FrontendAppView(TemplateView):
 #     template_name = './landfrontend/index.html'

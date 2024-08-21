@@ -2,6 +2,7 @@ import re
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
+from django.utils.translation import gettext as _
 
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
